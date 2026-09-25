@@ -1,0 +1,1 @@
+user@host:~/project$ git status -s

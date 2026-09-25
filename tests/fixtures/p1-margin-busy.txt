@@ -1,0 +1,15 @@
+    › alice: seam reply received - item 10 is #140, runs first in the queue under your conditions   steering          notes                      shell · 28 lines
+      -> ~/.local/state/tmux-comms/inbox/alice-to-bob-seam-thanks-20260925-0050.md (no
+      reply needed)
+
+    · reasoning 2.1s                                                                                    ^R expand
+
+    ▸ write
+      {"content": "Category: implement\nWorkspace: /home/user/project (git wor…
+
+    ▪▪▪  preparing · 61m56s                                                                           request 181
+
+    › steer the running turn
+    ⏎ queue steering   ⌥⏎ queue follow-up                                                               ^C cancel        ledger                                      ^Tab
+
+    anthropic-messages/claude-opus-4    project-x task/x     ctx 39%   spend —   1h01   diff —

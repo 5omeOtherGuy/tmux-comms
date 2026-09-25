@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# tmux-send — type a message into another agent's tmux pane and VERIFY it was submitted.
+#
+# Never sends Escape / C-c / C-u, never clears anyone's input, never kills anything.
+# The LAST line of stdout is the outcome, whose first word a caller can grep:
+#   DELIVERED | QUEUED | UNSENT | REFUSED | NOPANE | USAGE
+# Exit: 0 delivered (or queued as p1 steering) · 1 usage/error · 2 typed but NOT submitted
+#       3 refused (text already in composer, copy mode, shell/unknown target, own pane)
+#       4 no such / ambiguous / dead pane
+set -uo pipefail
+
+usage() {
+  cat <<'EOF'
+usage: tmux-send <pane|label> <text|-> [options]
+  <pane|label>  %N pane id, @pane-label, pane_title, window name, or sess:win.pane
+  <text>        message ("-" = read from stdin); newlines are flattened to spaces
+options:
+  --file F              write <text> to file F and send a one-line pointer instead
+                        (without <text>: send a pointer to the existing file F)
+  --force-second-enter  press Enter a second time ~1 s after the first (p1/Codex after long
+                        pastes) — only if the composer is empty or still holds our text
+  --no-verify           skip the typed/delivered checks (still refuses a composer that holds
+                        text, and a pane whose composer cannot be located)
+  --allow-shell         allow a plain shell prompt as target (text runs as a command!)
+  --from NAME           sender name for inbox files (default: own @pane-label or $USER)
+  --topic WORD          topic for inbox file names (default: msg)
+The last line of stdout starts with the outcome word — DELIVERED, QUEUED, UNSENT, REFUSED,
+NOPANE or USAGE — so `tmux-send ... | tail -1` is greppable even when the exit code is lost.
+The last line also holds no pane content, so it is safe to log.
+Messages longer than 600 chars (and every --file message) go to
+$TMUX_COMMS_INBOX/<from>-to-<to>-<topic>-<YYYYmmdd-HHMM>.md and only a pointer line is typed.
+Env: TMUX_COMMS_INBOX (default $XDG_STATE_HOME/tmux-comms/inbox, i.e.
+     ~/.local/state/tmux-comms/inbox), TMUX_COMMS_SOCKET (tmux -L name),
+     TMUX_COMMS_SETTLE (s, default 1.5), TMUX_COMMS_ENTER_WAIT (s, default 2),
+     TMUX_COMMS_GRACE (s, default 8: keep checking for a slow submit before reporting
+     UNSENT), TMUX_COMMS_FROM (sender name for inbox file names).
+exit: 0 delivered/queued, 1 usage, 2 typed-but-unsent, 3 refused, 4 no such/dead pane
+EOF
+}
+
+# tmux passes UTF-8; give the helper tooling a UTF-8 locale when the caller has none. Only a
+# locale this machine really has is set: a bogus LC_ALL makes every glibc tool print a warning.
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+  *[Uu][Tt][Ff]-8* | *[Uu][Tt][Ff]8*) ;;
+  *)
+    for cand in C.UTF-8 C.utf8 en_US.UTF-8 en_US.utf8; do
+      if locale -a 2>/dev/null | grep -qxF -- "$cand"; then export LC_ALL="$cand"; break; fi
+    done ;;
+esac
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB="$HERE/tmux-comms-lib.py"
+SETTLE="${TMUX_COMMS_SETTLE:-1.5}"
+ENTER_WAIT="${TMUX_COMMS_ENTER_WAIT:-2}"
+GRACE="${TMUX_COMMS_GRACE:-8}"
+CHUNK=500
+INLINE_MAX=600
+INBOX="${TMUX_COMMS_INBOX:-${XDG_STATE_HOME:-$HOME/.local/state}/tmux-comms/inbox}"
+
+tmx() {
+  if [[ -n "${TMUX_COMMS_SOCKET:-}" ]]; then tmux -L "$TMUX_COMMS_SOCKET" "$@"; else tmux "$@"; fi
+}
+lib() { python3 "$LIB" "$@"; }
+err() { printf 'tmux-send: %s\n' "$*" >&2; }
+outcome() { printf '%s %s\n' "$1" "${2:-}"; }        # always the LAST line, always on stdout
+# Never print another session's pane content or composer text into the sender's log (it may be
+# text a person is still typing). Point at the inspection command instead.
+pane_tail() { echo "  | (pane content not shown; inspect: tmux capture-pane -p -t $pane | tail -${1:-15})"; }
+usage_die() { usage >&2; outcome USAGE "bad arguments (see usage above)"; exit 1; }
+
+target="" text="" have_text=0 file="" force2=0 noverify=0 allow_shell=0
+from="${TMUX_COMMS_FROM:-}" topic="msg"
+while (($#)); do
+  case "$1" in
+    --file) [[ $# -ge 2 ]] || usage_die; file="$2"; shift 2 ;;
+    --file=*) file="${1#--file=}"; shift ;;
+    --force-second-enter) force2=1; shift ;;
+    --no-verify) noverify=1; shift ;;
+    --allow-shell) allow_shell=1; shift ;;
+    --from) [[ $# -ge 2 ]] || usage_die; from="$2"; shift 2 ;;
+    --topic) [[ $# -ge 2 ]] || usage_die; topic="$2"; shift 2 ;;
+    -h | --help) usage; exit 0 ;;
+    --) shift
+        while (($#)); do
+          if [[ -z $target ]]; then target="$1"
+          elif ((have_text)); then text+=" $1"
+          else text="$1"; have_text=1; fi
+          shift
+        done ;;
+    -?*) err "unknown option $1 (put text starting with '-' after --)"; usage_die ;;
+    *) if [[ -z $target ]]; then target="$1"
+       elif ((have_text)); then text+=" $1"
+       else text="$1"; have_text=1; fi
+       shift ;;
+  esac
+done
+if [[ -z $target ]] || { ((!have_text)) && [[ -z $file ]]; }; then usage_die; fi
+if ((have_text)) && [[ $text == "-" ]]; then text="$(cat)"; fi
+
+# ---- resolve + inspect the target -------------------------------------------------------
+if ! pane="$(lib resolve "$target")"; then
+  outcome NOPANE "nothing named «$target» on this server (see message above)"
+  exit 4
+fi
+if [[ -z "${TMUX_COMMS_SOCKET:-}" && "$pane" == "${TMUX_PANE:-}" ]]; then
+  err "refusing: $pane is your own pane"; outcome REFUSED "$pane is your own pane"; exit 3
+fi
+
+inspect() {
+  IFS=$'\x1f' read -r H_HARNESS H_STATE H_COMPOSER _ H_DEAD H_MODE H_CMD H_TEXT \
+    < <(lib classify "$pane") || { err "pane $pane vanished"; exit 4; }
+}
+
+inspect
+if [[ $H_DEAD == 1 ]]; then
+  err "pane $pane is dead (remain-on-exit). Respawn it: tmux respawn-pane -t $pane [cmd]"
+  outcome NOPANE "$pane is dead — respawn-pane -t $pane [cmd]"
+  exit 4
+fi
+if [[ $H_MODE == 1 ]]; then
+  err "refusing: pane $pane is in copy/view mode (someone is scrolling). Not touching it."
+  outcome REFUSED "$pane is in copy/view mode"
+  exit 3
+fi
+if [[ $H_COMPOSER == text ]]; then
+  err "refusing: composer of $pane ($H_HARNESS) already holds text you did not type (${#H_TEXT} chars, not shown)"
+  err "not typing (texts would interleave) and not clearing it. Wait: tmux-await $pane --empty"
+  outcome REFUSED "composer of $pane ($H_HARNESS) already holds text (someone is typing)"
+  exit 3
+fi
+if [[ $H_COMPOSER == unknown ]]; then
+  err "refusing: $pane looks like a TUI ($H_HARNESS, cmd=$H_CMD) but its input line could not be"
+  err "located, so I cannot tell whether it is empty. Pane tail:"; pane_tail 8 >&2
+  outcome REFUSED "composer of $pane could not be located"
+  exit 3
+fi
+if [[ $H_HARNESS == shell && $allow_shell == 0 ]]; then
+  err "refusing: $pane is a plain shell ($H_CMD); text would run as a command. Use --allow-shell."
+  outcome REFUSED "$pane is a plain shell (use --allow-shell)"
+  exit 3
+fi
+if [[ $H_COMPOSER == none ]]; then
+  if ((noverify)); then
+    err "warning: no input prompt recognised in $pane (harness=$H_HARNESS); sending unverified"
+  else
+    err "refusing: no input prompt recognised in $pane (harness=$H_HARNESS, cmd=$H_CMD)."
+    err "cannot tell whether someone is typing there. Pane tail:"; pane_tail 8 >&2
+    outcome REFUSED "no input prompt recognised in $pane"
+    exit 3
+  fi
+fi
+
+# ---- long / explicit file messages -> inbox file + pointer ---------------------------------
+text="${text//$'\r'/}"
+if [[ -n $file ]] || ((${#text} > INLINE_MAX)); then
+  if [[ -z $from ]]; then
+    if [[ -z "${TMUX_COMMS_SOCKET:-}" && -n "${TMUX_PANE:-}" ]]; then
+      from="$(tmx display-message -p -t "$TMUX_PANE" '#{?@pane-label,#{@pane-label},#{window_name}}' 2>/dev/null)"
+    fi
+    from="${from:-${USER:-agent}}"
+  fi
+  to="$(tmx display-message -p -t "$pane" '#{?@pane-label,#{@pane-label},#{?#{==:#{pane_title},#{host}},#{window_name},#{pane_title}}}' 2>/dev/null)"
+  [[ -n $to ]] || to="pane${pane#%}"
+  from="${from//[^A-Za-z0-9._-]/-}" to="${to//[^A-Za-z0-9._-]/-}" topic="${topic//[^A-Za-z0-9._-]/-}"
+  if [[ -z $file ]]; then
+    mkdir -p "$INBOX" || { err "cannot create inbox $INBOX"; outcome USAGE "cannot create $INBOX"; exit 1; }
+    base="$INBOX/$from-to-$to-$topic-$(date +%Y%m%d-%H%M)"
+    file="$base.md" n=2
+    while [[ -e $file ]]; do file="$base-$n.md"; n=$((n + 1)); done
+  fi
+  # absolute path for the pointer line; python3 is already required by the classifier
+  file="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$file")"
+  if ((have_text)); then
+    mkdir -p "$(dirname "$file")" || {
+      err "cannot create $(dirname "$file")"; outcome USAGE "cannot write $file"; exit 1; }
+    {
+      printf '# %s → %s: %s (%s)\n\n' "$from" "$to" "$topic" "$(date '+%Y-%m-%d %H:%M %Z')"
+      printf '%s\n' "$text"
+    } >"$file" || { err "cannot write $file"; outcome USAGE "cannot write $file"; exit 1; }
+    err "wrote ${#text} chars to $file"
+  elif [[ ! -r $file ]]; then
+    err "--file $file does not exist and no text given"
+    outcome USAGE "--file $file does not exist and no text given"; exit 1
+  fi
+  text="[from $from] Message for you in $file ($(wc -c <"$file" | tr -d ' ') bytes) - please read it."
+fi
+msg="${text//$'\n'/ }"
+msg="${msg//$'\t'/ }"
+if [[ -z ${msg//[[:space:]]/} ]]; then err "empty message"; outcome USAGE "empty message"; exit 1; fi
+
+# ---- type (literal, chunked, never together with Enter) -----------------------------------
+send_literal() {
+  local c="$1"
+  # tmux treats an argv word ending in ';' as a command separator: escape the final ';'
+  if [[ $c == *';' ]]; then c="${c%;}\\;"; fi
+  tmx send-keys -t "$pane" -l -- "$c"
+}
+for ((i = 0; i < ${#msg}; i += CHUNK)); do
+  send_literal "${msg:i:CHUNK}" || {
+    err "tmux could not type into $pane"; outcome NOPANE "tmux could not type into $pane"; exit 4; }
+  sleep 0.2
+done
+sleep "$SETTLE"
+
+if ((!noverify)); then
+  seen="$(lib check-typed "$pane" "$msg")"
+  for _ in 1 2 3 4; do   # a busy TUI may redraw late: look again before giving up
+    [[ $seen == missing ]] || break
+    sleep 1; seen="$(lib check-typed "$pane" "$msg")"
+  done
+  case "$seen" in
+    ok) ;;
+    foreign)
+      err "composer of $pane holds more than your text (someone else typed at the same time)."
+      err "NOT pressing Enter. Your text is left in their composer; do NOT clear it — report it."
+      pane_tail 8 >&2
+      outcome UNSENT "typed text mixed with someone else's in $pane — Enter NOT pressed"
+      exit 2 ;;
+    *)
+      err "typed text is not visible in the composer of $pane ($seen); NOT pressing Enter. Pane tail:"
+      pane_tail 8 >&2
+      outcome UNSENT "typed text is not visible in the composer of $pane ($seen)"
+      exit 2 ;;
+  esac
+fi
+
+# ---- submit + verify -----------------------------------------------------------------------
+tmx send-keys -t "$pane" C-m
+enters=1
+if ((force2)); then
+  sleep 1
+  inspect
+  r="$(lib post-check "$pane" "$msg")"
+  if [[ $r == pending || $H_COMPOSER == empty ]]; then
+    tmx send-keys -t "$pane" C-m; enters=2
+  fi
+fi
+if ((noverify)); then
+  err "sent to $pane ($H_HARNESS) with $enters Enter(s), not verified"
+  outcome DELIVERED "$pane ($H_HARNESS) $enters Enter(s) unverified"
+  exit 0
+fi
+
+sleep "$ENTER_WAIT"
+r="$(lib post-check "$pane" "$msg")"
+if [[ $r == pending && $enters -lt 2 ]]; then
+  err "first Enter did not submit (paste detection?) — pressing Enter once more"
+  tmx send-keys -t "$pane" C-m; enters=2
+  sleep "$ENTER_WAIT"
+  r="$(lib post-check "$pane" "$msg")"
+fi
+# A TUI can take several seconds to clear a long paste after the Enter that submitted it (seen on
+# a p1 pane). Keep looking before calling it UNSENT: a false UNSENT invites a duplicate.
+waited=0
+while [[ $r == pending && $waited -lt $GRACE ]]; do
+  sleep 2; waited=$((waited + 2)); r="$(lib post-check "$pane" "$msg")"
+done
+((waited > 0)) && [[ $r != pending ]] && err "composer cleared ${waited}s after the last Enter (slow submit)"
+case "$r" in
+  delivered)
+    outcome DELIVERED "$pane ($H_HARNESS, was $H_STATE) after $enters Enter(s)"; exit 0 ;;
+  queued)
+    outcome QUEUED "$pane ($H_HARNESS busy, queued as steering) after $enters Enter(s)"; exit 0 ;;
+  pending)
+    err "NOT submitted: text still in the composer of $pane after $enters Enter(s). Pane tail:"
+    pane_tail 15 >&2
+    outcome UNSENT "text still in the composer of $pane after $enters Enter(s) — do not resend or press Enter yourself: tmux-await $pane --empty, then report it"
+    exit 2 ;;
+  *)
+    err "could not confirm delivery to $pane (input prompt not visible). Pane tail:"
+    pane_tail 15 >&2
+    outcome UNSENT "could not confirm delivery to $pane (input prompt not visible)"
+    exit 2 ;;
+esac

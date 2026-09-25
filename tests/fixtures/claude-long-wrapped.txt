@@ -1,0 +1,8 @@
+● Finished the refactor.
+
+────────────────────────────────────────────────────────────
+❯ all sessions: typed text is not sent until the composer is
+  empty — verify with capture-pane before and after pressing
+  Enter, then let tmux-send do both steps for you.
+────────────────────────────────────────────────────────────
+  ? for shortcuts                                        Opus 4.5

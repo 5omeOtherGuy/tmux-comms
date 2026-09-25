@@ -1,0 +1,4 @@
+p1 · claude-opus · ~/proj
+
+│ › message, / for commands │
+│   ⏎ send                  │

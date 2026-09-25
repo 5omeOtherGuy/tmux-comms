@@ -1,0 +1,7 @@
+>_ OpenAI Codex (v0.50.0)
+
+ model: gpt-5-codex
+
+› fix the flaky test please
+
+  87% context left · ? for shortcuts

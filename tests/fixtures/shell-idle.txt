@@ -1,0 +1,3 @@
+user@host:~/project$ ls
+README.md  src
+user@host:~/project$

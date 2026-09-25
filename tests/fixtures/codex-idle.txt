@@ -1,0 +1,7 @@
+>_ OpenAI Codex (v0.50.0)
+
+ model: gpt-5-codex   directory: ~/project
+
+› Ask Codex to do anything
+
+  100% context left · ? for shortcuts

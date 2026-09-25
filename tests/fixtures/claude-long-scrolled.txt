@@ -1,0 +1,6 @@
+────────────────────────────────────────────────────────────
+❯ …typed text is not sent until the
+  composer is empty — press Enter and re-verify, then report
+  the outcome word.
+────────────────────────────────────────────────────────────
+  ? for shortcuts                                        Opus 4.5

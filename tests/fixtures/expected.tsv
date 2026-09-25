@@ -1,0 +1,29 @@
+# file	cmd	harness	state	composer	marker	text
+claude-idle.txt	claude	claude	idle	empty	0	
+claude-busy.txt	claude	claude	busy	empty	0	
+claude-typed.txt	node	claude	idle	text	0	please review the diff in src/foo.rs and report back here
+claude-legacy-box.txt	node	claude	idle	text	0	hi there
+codex-idle.txt	node	codex	idle	empty	0	
+codex-busy-typed.txt	node	codex	busy	text	0	fix the flaky test please
+p1-idle.txt	p1	p1	idle	empty	0	
+p1-busy.txt	p1	p1	busy	empty	0	
+p1-busy-typed.txt	p1	p1	busy	text	0	also check the docs
+p1-steering-queued.txt	p1	p1	busy	empty	1	
+shell-idle.txt	bash	shell	idle	empty	0	
+shell-typed.txt	bash	shell	idle	text	0	git status -s
+unknown-vim.txt	vim	unknown	unknown	none	0	
+claude-user-text.txt	node	claude	idle	text	0	Did you restart the workers?
+claude-user-slash.txt	node	claude	idle	text	0	/status
+claude-long-wrapped.txt	node	claude	idle	text	0	all sessions: typed text is not sent until the composer is empty — verify with capture-pane before and after pressing Enter, then let tmux-send do both steps for you.
+claude-long-scrolled.txt	node	claude	idle	text	0	…typed text is not sent until the composer is empty — press Enter and re-verify, then report the outcome word.
+claude-tight-glyph.txt	node	claude	idle	text	0	Did you restart the workers?
+claude-gt-glyph-empty.txt	node	claude	idle	empty	0	
+claude-gt-glyph-user.txt	node	claude	idle	text	0	Did you restart the workers?
+claude-box-text.txt	node	claude	idle	text	0	Did you restart the workers?
+p1-steering-above.txt	p1	p1	busy	empty	1	
+p1-steering-above-wrapped.txt	p1	p1	busy	text	1	all sessions: typed text is not sent until the composer is empty — verify with capture-pane before and after pressing Enter, then let tmux-send do both steps for you.
+p1-box.txt	p1	p1	idle	empty	0	
+p1-gt-glyph.txt	p1	p1	idle	empty	0	
+codex-user-text.txt	node	codex	idle	text	0	fix the flaky test please
+p1-margin-busy.txt	p1	p1	busy	empty	0	
+p1-margin-typed-wrapped.txt	p1	p1	busy	text	0	alice: tmux-send exit-2 defect when the text wraps (repro + fix idea) -> ~/.local/state/tmux-comms/inbox/bob-to-alice-tmux-send-wrap-20260925-0052.md (no reply needed)

@@ -1,0 +1,5 @@
+· steering   alice: …  next boundary
+› all sessions: typed text is not sent until the composer is
+  empty — verify with capture-pane before and after pressing
+  Enter, then let tmux-send do both steps for you.
+⏎ queue steering   ⌥⏎ queue follow-up …

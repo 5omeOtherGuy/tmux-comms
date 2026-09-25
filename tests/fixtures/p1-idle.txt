@@ -1,0 +1,6 @@
+p1 · claude-opus · ~/project
+
+assistant: finished the refactor.
+
+› message, / for commands
+  ⏎ send

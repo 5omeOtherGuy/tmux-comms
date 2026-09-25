@@ -1,0 +1,7 @@
+>_ OpenAI Codex (v0.50.0)
+
+• Working (14s • esc to interrupt)
+
+› fix the flaky test please
+
+  ⏎ send   ⌃J newline   ⌃T transcript   ⌃C quit

@@ -1,0 +1,7 @@
+p1 · claude-opus · ~/project
+
+tool: cargo test (running)
+
+› steer the running turn
+  · steering: also check the docs
+  ⏎ queue steering

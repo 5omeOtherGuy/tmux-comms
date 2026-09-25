@@ -1,0 +1,5 @@
+p1 · claude-opus · ~/proj
+
+· steering   alice: …  next boundary
+› steer the running turn
+⏎ queue steering   ⌥⏎ queue follow-up …

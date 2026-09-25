@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# tmux-panes — list every pane: id, window, label, harness, idle/busy/dead, dead flag,
+# current command, last non-empty line (60 chars). Read-only.
+# usage: tmux-panes [--json]      Env: TMUX_COMMS_SOCKET (tmux -L name)
+set -uo pipefail
+case "${1:-}" in
+  -h | --help) sed -n '2,4p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  "" | --json) ;;
+  *) echo "usage: tmux-panes [--json]" >&2; exit 1 ;;
+esac
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$HERE/tmux-comms-lib.py" panes "$@"

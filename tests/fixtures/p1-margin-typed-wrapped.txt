@@ -1,0 +1,11 @@
+    ▸ write
+      {"content": "Category: implement\nWorkspace: /home/user/project (git wor…
+
+    ▪▪▪  preparing · 61m56s                                                                           request 181
+
+    › alice: tmux-send exit-2 defect when the text wraps (repro + fix idea) ->
+      ~/.local/state/tmux-comms/inbox/bob-to-alice-tmux-send-wrap-20260925-0052.md (no reply
+      needed)
+    ⏎ queue steering   ⌥⏎ queue follow-up                                                               ^C cancel        ledger                                      ^Tab
+
+    anthropic-messages/claude-opus-4    project-x task/x     ctx 39%   spend —   1h01   diff —
