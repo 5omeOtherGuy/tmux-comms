@@ -1,0 +1,10 @@
+● Started workflow build-and-test.
+
+╭────────────────────────────────────────────────────────────────╮
+│ Workflows                                                      │
+│                                                                │
+│ ❯ build-and-test     running    step 3/5    1m 12s             │
+│   lint               done                   0m 41s             │
+│   release-notes      queued                                    │
+╰────────────────────────────────────────────────────────────────╯
+  ↑↓ select · ⏎ collapse · x stop workflow · esc back

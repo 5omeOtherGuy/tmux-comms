@@ -81,8 +81,8 @@ that point.) The same three commands target a real agent pane: give the pane a l
 Without `--pane-label`, a target may be a pane id (`%12`), a `pane_title`, a window name, or a tmux
 target (`sess:win.pane`). Label and title matches must be unique; an ambiguous name is exit 4 and
 nothing is typed. When the target is refused, the reason is on stderr: a composer that already holds
-text, copy mode, a plain shell (needs `--allow-shell`, the text then *runs as a command*), an
-unrecognisable TUI, a dead pane, or the pane you are typing from.
+text, a full-screen view, copy mode, a plain shell (needs `--allow-shell`, the text then *runs as a
+command*), an unrecognisable TUI, a dead pane, or the pane you are typing from.
 
 ## Configuration
 
@@ -118,7 +118,7 @@ never contains pane text, so it is safe to log.
 | 0 | delivered, or queued as steering in a busy p1 pane | record the outcome; the recipient acknowledging is separate |
 | 1 | usage or file error | fix the arguments; do not resend blindly |
 | 2 | text may have been typed but submission is unconfirmed | do not resend and do not press Enter yourself; check with `tmux-await <pane> --empty` |
-| 3 | refused before typing (composer not empty, copy mode, plain shell, unknown TUI, own pane) | resolve the reported condition, then retry; never force |
+| 3 | refused before typing (composer not empty, full-screen view, copy mode, plain shell, unknown TUI, own pane) | resolve the reported condition, then retry; never force. For a composer that holds text or a full-screen view, wait with `tmux-await <pane> --empty` |
 | 4 | no such pane, ambiguous name, dead pane, or typing failed | rediscover the pane; partial typing is possible, so do not resend blindly |
 
 `tmux-await` exits 0 when the condition is met, 1 on timeout (it prints the reason and a short tail),
@@ -137,7 +137,7 @@ Read from `tmux capture-pane -p -J -t PANE`:
 
 | harness | empty composer | busy marker |
 |---|---|---|
-| Claude Code | `❯ ` alone between `───` rules; `Try "..."` placeholders count as empty | spinner line above (`✻ … (esc to interrupt)`) |
+| Claude Code | `❯ ` alone between `───` rules; `Try "..."` placeholders and a dim (SGR 2) prompt suggestion count as empty | spinner line above (`✻ … (esc to interrupt)`); a full-screen view (below) |
 | Codex CLI | `› Ask Codex to do anything` | `• Working (… esc to interrupt)`, or `esc to interrupt` |
 | p1 TUI | `› message, / for commands`, footer `⏎ send` | `› steer the running turn`, `⏎ queue steering`; Enter then queues steering (`· steering`) |
 | shell | `$ ` or `# ` prompt | not a shell (`#{pane_current_command}`) |
@@ -146,7 +146,19 @@ Read from `tmux capture-pane -p -J -t PANE`:
 A left margin (the p1 TUI draws four columns in), a missing space after the glyph (`❯text`), box
 edges, and wrapped or scrolled composer text are all handled. A bare `>` is only read as a prompt
 when the pane shows other TUI evidence (footer, placeholder or `@harness`), so a quoted line in a
-transcript is not mistaken for a composer.
+transcript is not mistaken for a composer. The newer Claude Code footer (`… · Context 41% · …`)
+counts as TUI evidence and ends the composer region like the older footers.
+
+Claude Code's full-screen views (the `/workflows` viewer, the agents viewer, task lists) show a
+key-command footer instead of a composer, with hints such as `esc back`, `x stop workflow`,
+`↑↓ select ·`, `↑↓ agent ·`, `j/k scroll` or `⏎ collapse`. Typed characters are commands there, so
+such a pane is reported as busy with composer `view` (harness `claude`, or the `@harness` override)
+and `tmux-send` refuses it with exit 3 until the view is closed.
+
+A plain capture cannot tell Claude Code's dim prompt suggestion from typed text. When a Claude
+composer seems to hold text, the pane is captured once more with its attributes
+(`capture-pane -p -e -J`); if everything in the composer is dim text on the prompt line, the
+composer counts as empty.
 
 ## Limits and caveats
 

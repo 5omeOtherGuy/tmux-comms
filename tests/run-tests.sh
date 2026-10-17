@@ -400,6 +400,34 @@ check "defect 4: p1 steering → last line starts with QUEUED" test "$(word)" = 
 send nope-no-such-pane "x"
 check "defect 4: unknown pane → last line starts with NOPANE (exit 4)" bash -c "[[ $RC == 4 ]] && [[ $(word) == NOPANE ]]"
 
+section "Claude Code full-screen view and dim prompt suggestion"
+P_VIEW=$(fake viewer claude --view)
+P_DIM=$(fake dimsugg claude "--dim-suggestion 'run the tests'")
+P_DIMMIX=$(fake dimmixed claude "--prefill '/sta' --dim-suggestion 'tus'")
+wait_screen "$P_VIEW" "esc back" >/dev/null || bad "pane $P_VIEW never showed its view footer"
+for p in "$P_DIM" "$P_DIMMIX"; do
+  wait_screen "$p" "? for shortcuts" >/dev/null || bad "pane $p never showed a Claude footer"
+done
+"$BIN/tmux-panes" --json >"$WORK/panes.json"
+check "tmux-panes: full-screen view → claude busy, composer view" \
+  bash -c "[[ $(json_field viewer harness)/$(json_field viewer state)/$(json_field viewer composer) == claude/busy/view ]]"
+check "tmux-panes: dim suggestion alone → composer empty; typed text before it → text" \
+  bash -c "[[ $(json_field dimsugg composer)/$(json_field dimmixed composer) == empty/text ]]"
+OUT="$("$BIN/tmux-await" viewer --empty --timeout 1 2>&1)"; RC=$?
+check "await --empty on a full-screen view times out (exit 1)" rc_is 1
+OUT="$("$BIN/tmux-await" dimsugg --empty --timeout 5 2>&1)"; RC=$?
+check "await --empty on a composer showing only a dim suggestion: exit 0" rc_is 0
+send "$P_VIEW" "alice → please check"
+check "full-screen view → REFUSED (exit 3)" bash -c "[[ $RC == 3 ]] && [[ \"$(word)\" == REFUSED ]]"
+check "full-screen view: tells the caller to wait with tmux-await --empty" out_has "tmux-await $P_VIEW --empty"
+check "full-screen view: not a single key reached the view" bash -c "! grep -qs . '$WORK/viewer.log'"
+send "$P_DIM" "dim suggestion is not text"
+check "dim suggestion alone: DELIVERED byte-exact" \
+  bash -c "[[ $RC == 0 ]] && [[ \"$(word)\" == DELIVERED ]] && grep -qxF 'SUBMIT	dim suggestion is not text' '$WORK/dimsugg.log'"
+send "$P_DIMMIX" "alice → please check"
+check "typed text followed by a dim completion → REFUSED, nothing typed" \
+  bash -c "[[ $RC == 3 ]] && [[ \"$(word)\" == REFUSED ]] && ! grep -qs . '$WORK/dimmixed.log'"
+
 section "isolation"
 check "no fake harness ever received ESC / C-u / C-c / C-w" bash -c "! cat '$WORK'/*.log | grep -q '^KEY'"
 check "tools never addressed a tmux server other than $SOCK" test ! -s "$WORK/shim-violations.log"

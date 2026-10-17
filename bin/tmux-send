@@ -5,7 +5,8 @@
 # The LAST line of stdout is the outcome, whose first word a caller can grep:
 #   DELIVERED | QUEUED | UNSENT | REFUSED | NOPANE | USAGE
 # Exit: 0 delivered (or queued as p1 steering) · 1 usage/error · 2 typed but NOT submitted
-#       3 refused (text already in composer, copy mode, shell/unknown target, own pane)
+#       3 refused (text already in composer, full-screen view, copy mode, shell/unknown
+#         target, own pane)
 #       4 no such / ambiguous / dead pane
 set -uo pipefail
 
@@ -120,6 +121,12 @@ fi
 if [[ $H_MODE == 1 ]]; then
   err "refusing: pane $pane is in copy/view mode (someone is scrolling). Not touching it."
   outcome REFUSED "$pane is in copy/view mode"
+  exit 3
+fi
+if [[ $H_COMPOSER == view ]]; then
+  err "refusing: $pane ($H_HARNESS) shows a full-screen view with a key-command footer, not a"
+  err "composer; typed characters would be commands there. Wait: tmux-await $pane --empty"
+  outcome REFUSED "$pane ($H_HARNESS) shows a full-screen view, not a composer"
   exit 3
 fi
 if [[ $H_COMPOSER == text ]]; then

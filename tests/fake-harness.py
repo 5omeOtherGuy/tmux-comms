@@ -5,6 +5,7 @@ Log lines (tab separated) go to --log:
   SUBMIT <text>   message submitted with Enter      STEER <text>  queued steering (p1 busy)
   SWALLOW <text>  Enter ignored (paste detection)   KEY <name>    ESC / C-u / C-c / C-w received
   TYPED <text>    someone else typed this text into the composer (--clear-after)
+  VIEWKEY <char>  a key arrived while the full-screen view was shown (--view)
 """
 import argparse
 import codecs
@@ -35,10 +36,16 @@ ap.add_argument("--reveal", default="",
                      "tail:N or slice:S:E")
 ap.add_argument("--interleave", default="",
                 help="TEXT appears in the composer the moment the first foreign key arrives")
+ap.add_argument("--view", action="store_true",
+                help="claude only: show a full-screen view (key-command footer, no composer)")
+ap.add_argument("--dim-suggestion", default="",
+                help="claude only: draw TEXT dim (SGR 2) after the composer contents until a key "
+                     "is typed, like Claude Code's prompt suggestion")
 ap.add_argument("--log", required=True)
 a = ap.parse_args()
 
 buf = a.prefill
+suggest = a.dim_suggestion  # shown until the first key is typed
 history = []
 swallow_left = a.swallow_enters
 clear_at = None  # --submit-delay: composer still shows the submitted text until then
@@ -70,13 +77,19 @@ def draw():
     w = os.get_terminal_size().columns
     out = ["\x1b[H\x1b[2J"]
     lines = []
-    if a.kind == "claude":
+    if a.kind == "claude" and a.view:
+        lines.append(" Workflows")
+        lines.append(" ❯ build-and-test   running   step 3/5")
+        lines.append("   lint             done")
+        lines.append("")
+        lines.append("  ↑↓ select · ⏎ collapse · x stop workflow · esc back")
+    elif a.kind == "claude":
         lines.append(" ✻ Claude Code (fake fixture)")
         lines += ["● got: " + h for h in history[-8:]]
         if a.busy:
             lines.append("✻ Thinking… (3s · esc to interrupt)")
         lines.append("─" * (w - 1))
-        lines.append(glyph + gap + shown(buf))
+        lines.append(glyph + gap + shown(buf) + ("\x1b[2m%s\x1b[22m" % suggest if suggest else ""))
         lines.append("─" * (w - 1))
         lines.append("  ? for shortcuts                                   fake-opus")
     elif a.kind == "codex":
@@ -146,6 +159,10 @@ try:
         if not data:
             break
         for ch in dec.decode(data):
+            if a.view:
+                log("VIEWKEY", repr(ch))
+                continue
+            suggest = ""
             if ch in "\r\n":
                 if clear_at:
                     log("LATE-ENTER", buf)      # already submitted; a TUI ignores this Enter

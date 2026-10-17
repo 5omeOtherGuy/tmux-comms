@@ -27,3 +27,7 @@ p1-gt-glyph.txt	p1	p1	idle	empty	0
 codex-user-text.txt	node	codex	idle	text	0	fix the flaky test please
 p1-margin-busy.txt	p1	p1	busy	empty	0	
 p1-margin-typed-wrapped.txt	p1	p1	busy	text	0	alice: tmux-send exit-2 defect when the text wraps (repro + fix idea) -> ~/.local/state/tmux-comms/inbox/bob-to-alice-tmux-send-wrap-20260925-0052.md (no reply needed)
+claude-view-workflows.txt	node	claude	busy	view	0	
+claude-view-agents.txt	node	claude	busy	view	0	
+claude-context-footer.txt	node	claude	idle	empty	0	
+claude-context-footer-typed.txt	node	claude	idle	text	0	please also update the changelog

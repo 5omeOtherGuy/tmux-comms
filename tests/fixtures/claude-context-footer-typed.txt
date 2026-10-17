@@ -1,0 +1,5 @@
+● Done. The parser now accepts trailing commas.
+
+────────────────────────────────────────────────────────────────
+❯ please also update the changelog
+  Opus 4.7 · Context 41% · main

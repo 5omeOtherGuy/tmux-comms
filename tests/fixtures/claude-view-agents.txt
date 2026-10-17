@@ -1,0 +1,6 @@
+ Agents (2 running)
+
+ ❯ reviewer      reading src/parser.rs
+   test-runner   running the test suite
+
+ ↑↓ agent · j/k scroll · esc back

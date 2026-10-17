@@ -46,7 +46,13 @@ GT_PROMPT_RE = re.compile(r"^[ \t]*(?:[│┃|][ \t]*)?(>)[ \t\u00a0]*(.*?)[ \t\
 BOX_EDGE_RE = re.compile(r"^[ \t]*[│┃|]")
 BORDER_RE = re.compile(r"^\s*[│┃|]?\s*[─━═╭╮╰╯┌┐└┘▔▁]{3,}\s*$")
 FOOTER_MARKERS = ("⏎", "? for shortcuts", "context left", "esc to interrupt", "⏵⏵", "shift+tab",
-                  "queue steering", "queue follow-up")
+                  "queue steering", "queue follow-up", "· Context ")
+# Key-command footers of Claude Code's full-screen views (the /workflows viewer, the agents
+# viewer, task lists). There is no composer on such a screen: typed characters are commands.
+VIEW_MARKERS = ("esc back", "x stop workflow", "x stop ·", "↑↓ select ·", "↑↓ agent ·",
+                "j/k scroll", "⏎ collapse")
+# Escape sequences in `capture-pane -e` output: CSI (SGR ends in "m"), OSC, and two-byte escapes.
+ESC_RE = re.compile(r"\x1b\[([0-9;:?]*)([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b.")
 CLAUDE_EVIDENCE = ("? for shortcuts", "⏵⏵", "bypass permissions", 'Try "')
 SPINNER_RE = re.compile(r"^\s*[✻✶✳✢✽*●◐◓◑◒⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏·]\s+\S.*(…|\.\.\.)")
 P1_MARKER_RE = re.compile(r"·\s*steering|\bqueued\b", re.IGNORECASE)
@@ -159,6 +165,7 @@ def classify_lines(lines, cmd="", override=""):
                | text    | holds text (someone's, possibly ours): never type blind
                | none    | no input prompt at all (plain shell / not a TUI)
                | unknown | looks like a TUI but the composer line could not be located
+               | view    | a full-screen view whose keys are commands: never type
       text = everything from the prompt glyph up to the separator/footer: the composer region,
              including wrapped continuation lines and text on the glyph line itself. ANY
              non-empty region is text, so a line a person typed ("❯ Did you restart the
@@ -168,6 +175,10 @@ def classify_lines(lines, cmd="", override=""):
     lines = [clean_line(l) for l in lines]
     bottom = "\n".join(lines[-14:])
     screen = "\n".join(lines)
+    if any(m in bottom for m in VIEW_MARKERS):
+        # checked first: a view may draw "❯" as its selection cursor, which is not a prompt
+        return {"harness": override or "claude", "state": "busy", "composer": "view", "text": "",
+                "marker": False, "prompt": None}
     tui_evidence = bool(override) or any(m in bottom for m in FOOTER_MARKERS) or any(
         p in screen for p in CODEX_PLACEHOLDERS + P1_PLACEHOLDERS)
 
@@ -266,12 +277,76 @@ def last_line(lines, width=60):
     return ""
 
 
+def _apply_sgr(params, dim):
+    """Return the dim (SGR 2) state after the SGR sequence ESC[<params>m."""
+    parts = params.split(";") if params else ["0"]
+    i = 0
+    while i < len(parts):
+        sub = parts[i].split(":")
+        code = int(sub[0]) if sub[0].isdigit() else 0
+        if code in (38, 48, 58) and len(sub) == 1:   # extended colour: skip its arguments
+            mode = parts[i + 1] if i + 1 < len(parts) else ""
+            i += {"5": 3, "2": 5}.get(mode, 1)
+            continue
+        if code in (0, 22):
+            dim = False
+        elif code == 2:
+            dim = True
+        i += 1
+    return dim
+
+
+def _styled_lines(raw_lines):
+    """Split `capture-pane -e` lines into [(char, dim)] lists. tmux emits only attribute
+    changes, so the dim state carries over from one line to the next."""
+    dim, out = False, []
+    for raw in raw_lines:
+        chars, pos = [], 0
+        for m in ESC_RE.finditer(raw):
+            chars += [(ch, dim) for ch in raw[pos:m.start()]]
+            pos = m.end()
+            if m.group(2) == "m":
+                dim = _apply_sgr(m.group(1), dim)
+        chars += [(ch, dim) for ch in raw[pos:]]
+        out.append(chars)
+    return out
+
+
+def dim_suggestion_only(pane_id, cmd, override):
+    """Claude Code draws a dim (SGR 2) prompt suggestion in an empty composer, which a plain
+    capture cannot tell from typed text. True when the composer region holds nothing but text
+    inside dim segments on the prompt line."""
+    try:
+        styled = _styled_lines(tmux("capture-pane", "-p", "-e", "-J", "-t", pane_id).split("\n"))
+    except TmuxError:
+        return False
+    lines = ["".join(ch for ch, _ in s).rstrip() for s in styled]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    c = classify_lines(lines, cmd, override)
+    if c["harness"] != "claude" or c["composer"] != "text":
+        return False
+    line = clean_line(lines[c["prompt"]])
+    m = PROMPT_RE.match(line) or GT_PROMPT_RE.match(line)
+    after = styled[c["prompt"]][m.end(1):len(line)]
+    dim_text = _strip_edges("".join(ch for ch, d in after if d))
+    other = _strip_edges("".join(ch for ch, d in after if not d))
+    return bool(dim_text) and not other and _ns(dim_text) == _ns(c["text"])
+
+
+def drop_dim_suggestion(pane_id, c, cmd, override):
+    if c["harness"] == "claude" and c["composer"] == "text" and dim_suggestion_only(
+            pane_id, cmd, override):
+        c["composer"], c["text"] = "empty", ""
+
+
 def classify_pane(pane_id):
     info = pane_info(pane_id)
     if info is None:
         return None, None, []
     lines = capture(pane_id)
     c = classify_lines(lines, info["pane_current_command"], info["@harness"])
+    drop_dim_suggestion(pane_id, c, info["pane_current_command"], info["@harness"])
     if info["pane_dead"] == "1":
         c["state"] = "dead"
     return info, c, lines
@@ -335,7 +410,7 @@ def post_check(c, sent):
         return "pending"
     if c["marker"] and c["harness"] == "p1":
         return "queued"
-    if c["composer"] in ("none", "unknown"):
+    if c["composer"] in ("none", "unknown", "view"):
         return "noprompt"
     return "delivered"  # composer empty, or holds only someone else's new text
 
@@ -357,6 +432,7 @@ def cmd_panes(as_json):
         except TmuxError:
             lines = []
         c = classify_lines(lines, p["pane_current_command"], p["@harness"])
+        drop_dim_suggestion(p["pane_id"], c, p["pane_current_command"], p["@harness"])
         dead = p["pane_dead"] == "1"
         rows.append({
             "id": p["pane_id"],
