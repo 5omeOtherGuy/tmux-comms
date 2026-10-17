@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Orb setup for tmux-comms: install what scripts/gate needs (tmux, python3, shellcheck) and the
+# pre-push secret-scan hook. Idempotent: a warm run installs nothing.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+missing=()
+for tool in tmux python3 shellcheck; do
+  command -v "$tool" >/dev/null || missing+=("$tool")
+done
+if ((${#missing[@]})); then
+  echo "setup: installing ${missing[*]}"
+  sudo apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"
+fi
+
+# Repository-local hooks directory: a global core.hooksPath (an orb's prepare-commit-msg hook adds
+# a Co-authored-by trailer with a personal email address) must not reach this public repository.
+git config core.hooksPath "$PWD/.git/hooks"
+tools/install-git-hooks.sh
+
+# The gate needs no credentials; report which ones are present without printing them.
+for var in GH_TOKEN GITHUB_TOKEN; do
+  if [[ -n ${!var:-} ]]; then echo "setup: $var present"; else echo "setup: $var absent"; fi
+done
