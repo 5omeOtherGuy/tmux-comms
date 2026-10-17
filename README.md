@@ -1,5 +1,14 @@
 # tmux-comms
 
+Verified message delivery into agent CLIs running in tmux panes (Claude Code, Codex, others).
+
+Status: prototype. It works and is tested, but commands, output and exit codes may still change
+without notice.
+
+[![gate](https://github.com/5omeOtherGuy/tmux-comms/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/5omeOtherGuy/tmux-comms/actions/workflows/ci.yml)
+
+## What it does
+
 Three commands for sending text to a tmux pane that runs an interactive agent CLI (Claude Code,
 Codex CLI, or anything else whose composer the classifier recognises), and for checking that the
 text was actually submitted:
@@ -178,14 +187,24 @@ composer counts as empty.
 * Developed and tested on Linux with GNU coreutils and on tmux 3.7; no Windows support.
 * Not a session or worktree manager: it does not create, arrange or kill anything.
 
-## Tests
+## Development
+
+The gate runs everything a change must pass (shellcheck, the secret scan and the test suite) and
+is what CI runs, in the job `gate`, on pushes to `main` and on pull requests:
+
+```sh
+scripts/gate
+```
+
+It needs `tmux`, `python3` and `shellcheck`, prints `gate: ok` on success and the failing step's
+output otherwise. To run only the test suite:
 
 ```sh
 bash tests/run-tests.sh
 ```
 
-Needs `tmux` and `python3` (and `shellcheck` for the lint check; without it that check prints
-`SKIP`). It takes about three minutes, most of it deliberate sleeps. The suite:
+Without `shellcheck` the suite prints `SKIP` for its lint check. It takes about three minutes,
+most of it deliberate sleeps. The suite:
 
 * runs against a private server (`tmux -L tmuxcomms-test`) and installs a `tmux` shim on `PATH`
   that makes any call to another server fail loudly, so the machine's own tmux server is untouched;
@@ -215,8 +234,7 @@ tools/install-git-hooks.sh        # install tools/hooks/pre-push as .git/hooks/p
 ```
 
 With the hook installed, every `git push` scans each outgoing commit's patch and file names and
-refuses on a hit or a scanner error (it fails closed). `.github/workflows/ci.yml` runs the scan and
-the test suite on every push.
+refuses on a hit or a scanner error (it fails closed).
 
 ## License
 
