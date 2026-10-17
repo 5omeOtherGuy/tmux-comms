@@ -36,7 +36,7 @@ macOS (Homebrew): `brew install tmux python3`.
 ## Install
 
 ```sh
-git clone <url-of-this-repository> tmux-comms
+git clone https://github.com/5omeOtherGuy/tmux-comms tmux-comms
 install -m 0755 tmux-comms/bin/tmux-send tmux-comms/bin/tmux-panes \
   tmux-comms/bin/tmux-await tmux-comms/bin/tmux-comms-lib.py ~/.local/bin/
 ```
