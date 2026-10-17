@@ -47,7 +47,7 @@ scan_commit() {
   return 0
 }
 
-while read -r local_ref local_sha remote_ref remote_sha; do
+while read -r local_ref local_sha _remote_ref remote_sha; do
   [ -n "${local_sha:-}" ] || continue
   [ "$local_sha" = "$ZERO" ] && continue            # deletion: nothing outgoing
   if [ ! -x "$SCAN" ]; then

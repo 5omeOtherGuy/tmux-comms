@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# gate: everything a change must pass, in one command (CI job `gate` runs exactly this).
+#   1. shellcheck on the repository's shell scripts outside bin/ (bin/ is linted by the suite)
+#   2. tools/secret-scan.sh on the working tree
+#   3. tests/run-tests.sh: syntax checks, shellcheck of bin/, fixtures, live fake-TUI suite
+# Needs tmux, python3 and shellcheck. Quiet on success; on failure it prints the failing step
+# and its full output.
+# usage: scripts/gate
+set -uo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOG="$(mktemp "${TMPDIR:-/tmp}/gate.XXXXXX")"
+trap 'rm -f "$LOG"' EXIT
+
+for tool in tmux python3 shellcheck; do
+  command -v "$tool" >/dev/null || { echo "gate: $tool is not installed; the gate needs it" >&2; exit 1; }
+done
+
+step() { # name command...
+  local name=$1; shift
+  if ! "$@" >"$LOG" 2>&1; then
+    echo "gate: FAILED: $name" >&2
+    cat "$LOG" >&2
+    exit 1
+  fi
+}
+
+step "shellcheck" shellcheck "$ROOT/scripts/gate" "$ROOT/tools/secret-scan.sh" \
+  "$ROOT/tools/install-git-hooks.sh" "$ROOT/tools/hooks/pre-push" "$ROOT/.agents/setup"
+step "secret scan" "$ROOT/tools/secret-scan.sh" "$ROOT"
+step "test suite" bash "$ROOT/tests/run-tests.sh"
+echo "gate: ok"
