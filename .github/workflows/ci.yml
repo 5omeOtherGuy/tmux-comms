@@ -5,11 +5,17 @@ on:
   pull_request:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.x'
@@ -17,7 +23,5 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux shellcheck
       - name: tmux version
         run: tmux -V
-      - name: secret scan
-        run: tools/secret-scan.sh
-      - name: test suite
-        run: bash tests/run-tests.sh
+      - name: gate
+        run: scripts/gate
