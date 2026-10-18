@@ -2,11 +2,14 @@
 
 ## Profile
 - Purpose: type messages into tmux panes running agent CLIs and verify they were submitted
-- Stage: prototype (repository standard 2026-10-17)
+- Stage: prototype (repository standard 2026-10-18)
 - Gate: `scripts/gate` (CI job `gate`)
 - Landing: direct to main after a green gate; agents land: yes
 - Release: none; agents release: no
 - Outside issues and PRs: agents triage; outside PRs merge: owner approves
+- Sensitive paths: `AGENTS.md`, `.agents/`, `.github/workflows/`, `scripts/gate`,
+  `tools/secret-scan.sh`, `tools/hooks/`, `tools/install-git-hooks.sh`, `bin/` (public interface),
+  `tests/run-tests.sh` (its source checks enforce the keystroke rule)
 
 No deliberate deviations from the standard.
 
@@ -24,6 +27,8 @@ No deliberate deviations from the standard.
 ## Landing (prototype)
 Small commits straight to `main`, Conventional Commits subjects. Run `scripts/gate` before
 pushing; push at the end of every session. Risky ideas go on `spike/<slug>` branches.
+A change to a sensitive path gets an independent review of its diff (another agent or the owner)
+before it is pushed, with the verdict recorded in the commit body.
 
 ## Rules
 - The tools must never type where keystrokes would do anything but add text: no Escape, `C-u`,
@@ -37,7 +42,8 @@ pushing; push at the end of every session. Risky ideas go on `spike/<slug>` bran
 - Keep the code site-independent: no personal paths, hostnames or names.
 - Standard library only (Python), no new runtime dependencies.
 - This repository is public: commits carry no personal email address, including in trailers.
-  `.agents/setup` sets a repository-local `core.hooksPath` for that reason.
+  `.agents/setup` sets a repository-local `core.hooksPath` for that reason. Author with a GitHub
+  noreply address; check `git config user.email` before the first push.
 
 ## Focused tests
 - One fixture: `python3 bin/tmux-comms-lib.py classify-text --cmd node < tests/fixtures/<f>.txt`
