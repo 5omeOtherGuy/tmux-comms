@@ -4,7 +4,8 @@
 Log lines (tab separated) go to --log:
   SUBMIT <text>   message submitted with Enter      STEER <text>  queued steering (p1 busy)
   SWALLOW <text>  Enter ignored (paste detection)   KEY <name>    ESC / C-u / C-c / C-w received
-  TYPED <text>    someone else typed this text into the composer (--clear-after)
+  TYPED <text>    someone else submitted the prefilled text (--clear-when)
+  LATE-ENTER <text>  Enter while the submitted text still lingers (--linger-until)
   VIEWKEY <char>  a key arrived while the full-screen view was shown (--view)
 """
 import argparse
@@ -13,7 +14,6 @@ import os
 import select
 import sys
 import termios
-import time
 import tty
 
 ap = argparse.ArgumentParser()
@@ -25,10 +25,11 @@ ap.add_argument("--prefill", default="", help="text already in the composer (som
 ap.add_argument("--margin", type=int, default=0, help="left margin in columns (p1 draws 4)")
 ap.add_argument("--wrap", type=int, default=0,
                 help="p1 only: wrap the composer text at this width with a 2-column hanging indent")
-ap.add_argument("--submit-delay", type=float, default=0,
-                help="seconds the submitted text stays visible in the composer (slow TUI redraw)")
-ap.add_argument("--clear-after", type=float, default=0,
-                help="the prefilled text is submitted by someone else after S seconds")
+ap.add_argument("--linger-until", default="",
+                help="the submitted text stays visible in the composer until FILE exists "
+                     "(slow TUI redraw); the test creates FILE when it wants the redraw")
+ap.add_argument("--clear-when", default="",
+                help="the prefilled text is submitted by someone else once FILE exists")
 ap.add_argument("--glyph", default="", help="override the prompt glyph (default: ❯ / ›)")
 ap.add_argument("--tight-glyph", action="store_true", help="no space between glyph and text")
 ap.add_argument("--reveal", default="",
@@ -48,8 +49,7 @@ buf = a.prefill
 suggest = a.dim_suggestion  # shown until the first key is typed
 history = []
 swallow_left = a.swallow_enters
-clear_at = None  # --submit-delay: composer still shows the submitted text until then
-start = time.time()
+lingering = False  # --linger-until: composer still shows the submitted text
 glyph = a.glyph or ("❯" if a.kind == "claude" else "›")
 gap = "" if a.tight_glyph else " "
 
@@ -121,7 +121,7 @@ def draw():
 
 
 def submit():
-    global buf, swallow_left, clear_at
+    global buf, swallow_left, lingering
     text = buf
     if a.kind == "p1" and a.busy:
         history.append("· steering: " + text)
@@ -129,8 +129,8 @@ def submit():
     else:
         history.append(text)
         log("SUBMIT", text)
-    if a.submit_delay:
-        clear_at = time.time() + a.submit_delay   # text lingers; Enters meanwhile are ignored
+    if a.linger_until:
+        lingering = True   # text lingers; Enters meanwhile are ignored
     else:
         buf = ""
     swallow_left = a.swallow_enters
@@ -144,14 +144,14 @@ try:
     draw()
     while True:
         r, _, _ = select.select([fd], [], [], 0.2)
-        if a.clear_after and buf == a.prefill and a.prefill and time.time() - start > a.clear_after:
+        if a.clear_when and buf == a.prefill and a.prefill and os.path.exists(a.clear_when):
             log("TYPED", buf)
             history.append(buf)
             buf = ""
             a.prefill = ""
             draw()
-        if clear_at and time.time() >= clear_at:
-            buf, clear_at = "", None
+        if lingering and os.path.exists(a.linger_until):
+            buf, lingering = "", False
             draw()
         if not r:
             continue
@@ -164,7 +164,7 @@ try:
                 continue
             suggest = ""
             if ch in "\r\n":
-                if clear_at:
+                if lingering:
                     log("LATE-ENTER", buf)      # already submitted; a TUI ignores this Enter
                 elif buf and swallow_left > 0:
                     swallow_left -= 1

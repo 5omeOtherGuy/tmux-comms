@@ -205,7 +205,9 @@ bash tests/run-tests.sh
 ```
 
 Without `shellcheck` the suite prints `SKIP` for its lint check. It takes about three minutes,
-most of it deliberate sleeps. The suite:
+almost all of it `tmux-send`'s own settle and Enter waits; the suite itself never sleeps for a
+fixed time but waits for what it can observe (a pane's screen, a fake TUI's log, a completed tmux
+call), and the fake TUI changes state when the suite creates a trigger file. The suite:
 
 * runs against a private server (`tmux -L tmuxcomms-test`) and installs a `tmux` shim on `PATH`
   that makes any call to another server fail loudly, so the machine's own tmux server is untouched;

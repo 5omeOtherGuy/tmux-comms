@@ -4,8 +4,11 @@
 # a guard shim makes any tmux call from the tools that targets another server fail loudly.
 # Everything the tools write (HOME, XDG_STATE_HOME, inbox, logs) stays in one temp work dir,
 # so the suite does not touch the machine it runs on.
-# usage: tests/run-tests.sh    (≈3 min; needs tmux >= 3.0 and python3 >= 3.11; shellcheck is
-#                              used when installed, skipped with a note otherwise)
+# usage: tests/run-tests.sh    (needs tmux >= 3.0 and python3 >= 3.11; shellcheck is used when
+#                              installed, skipped with a note otherwise)
+# Synchronisation: the suite never sleeps for a fixed time. It waits for something it can observe
+# (a pane's screen, a fake harness's log, a completed tmux call in tmux-calls.log), and the fake
+# harness changes state when the suite creates a trigger file, never after a delay.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,10 +38,17 @@ else
 fi
 
 # ---- guard shim: tools may only talk to the private server -----------------------------------
+# Each allowed call is appended to tmux-calls.log once it has completed, so a test can wait until
+# a tool running in the background has looked at a pane.
 mkdir -p "$WORK/shim"
+: >"$WORK/tmux-calls.log"
 cat >"$WORK/shim/tmux" <<EOF
 #!/usr/bin/env bash
-if [[ "\${1:-}" == -L && "\${2:-}" == "$SOCK" ]]; then exec "$REAL_TMUX" "\$@"; fi
+if [[ "\${1:-}" == -L && "\${2:-}" == "$SOCK" ]]; then
+  "$REAL_TMUX" "\$@"; rc=\$?
+  printf '%s\n' "\$*" >>"$WORK/tmux-calls.log"
+  exit "\$rc"
+fi
 printf '%s\n' "\$*" >>"$WORK/shim-violations.log"
 exit 99
 EOF
@@ -71,10 +81,16 @@ screen_has() { T capture-pane -p -J -t "$1" | grep -qF -- "$2"; }
 newpane() { T new-window -d -P -F '#{pane_id}' -n "$1" -c "$WORK" "$2"; }
 fake() { local n="$1" k="$2"; shift 2; newpane "$n" "python3 '$HERE/fake-harness.py' --kind $k --log '$WORK/$n.log' $*"; }
 ps1pane() { newpane "$1" "PS1='$2' HISTFILE=/dev/null bash --norc --noprofile"; }
-wait_screen() { # pane text
-  local i; for ((i = 0; i < 50; i++)); do screen_has "$1" "$2" && return 0; sleep 0.1; done
-  echo "      pane $1 never showed «$2»"; return 1
+wait_for() { # what command... — poll something observable until it holds (20 s at most)
+  local i; for ((i = 0; i < 200; i++)); do "${@:2}" && return 0; sleep 0.1; done
+  echo "      never: $1"; return 1
 }
+wait_screen() { wait_for "pane $1 shows «$2»" screen_has "$1" "$2"; } # pane text
+calls() { wc -l <"$WORK/tmux-calls.log"; }
+captured_since() { # N pane — a capture of pane completed after the first N logged tmux calls
+  tail -n +"$(($1 + 1))" "$WORK/tmux-calls.log" | grep -qE -- "capture-pane .*-t $2\$"
+}
+is_dead() { [[ $(T display-message -p -t "$1" '#{pane_dead}') == 1 ]]; }
 word() { printf '%s\n' "$OUT" | tail -n 1 | awk '{print $1}'; }
 json_field() { # window-name field
   python3 -c 'import json,sys; rows=json.load(open(sys.argv[1])); print([str(r[sys.argv[3]]) for r in rows if r["window_name"]==sys.argv[2]][0])' \
@@ -158,7 +174,7 @@ P_DUP1=$(fake dup1 claude)
 P_DUP2=$(fake dup2 claude)
 P_LONG=$(fake longmsg claude)
 P_FILE=$(fake filemsg p1)
-P_AWAIT=$(fake awaiter claude "--prefill 'draft in progress' --clear-after 3")
+P_AWAIT=$(fake awaiter claude "--prefill 'draft in progress' --clear-when '$WORK/awaiter.release'")
 P_MODE=$(fake scrolled claude)
 P_RACE=$(fake race claude "--interleave 'What direct'")
 P_USERLINE=$(fake userline claude "--prefill 'Did you restart the workers?'")
@@ -174,27 +190,25 @@ P_VIEWS=$(fake viewslice claude --reveal slice:40:120)
 P_P1VIEW=$(fake p1viewtail p1 "--busy --reveal tail:25")
 P_STUCK2=$(fake codexstuck2 codex --swallow-enters 9)
 P_GTP1IDLE=$(fake gtglyphidle p1 "--glyph '>'")
-P_SLOW=$(fake p1slow p1 --submit-delay 5)
+P_SLOW=$(fake p1slow p1 "--linger-until '$WORK/p1slow.release'")
 P_MARGIN=$(fake p1margin p1 "--margin 4 --wrap 90")
 P_MARGINB=$(fake p1marginbusy p1 "--margin 4 --wrap 90 --busy")
 P_DEAD=$(newpane deadwin "exit 0")
-for p in "$P_CL_PS1" "$P_P1_PS1" "$P_CX_PS1"; do wait_screen "$p" "›" >/dev/null 2>&1 || wait_screen "$p" "❯"; done
-wait_screen "$P_SH_PS1" '$'
-for p in "$P_RACE" "$P_CL" "$P_CLB" "$P_LAB" "$P_DUP1" "$P_DUP2" "$P_LONG" "$P_MODE"; do
-  wait_screen "$p" "❯" >/dev/null || bad "pane $p never showed a ❯ prompt"
+# Wait until every pane has drawn its first screen: the bash panes their prompt, the fakes their
+# footer (drawn last, in the same write as the rest of the screen), and the dead pane has exited.
+for spec in "$P_CL_PS1:❯" "$P_P1_PS1:› message" "$P_CX_PS1:› Ask Codex" "$P_SH_PS1:\$"; do
+  wait_screen "${spec%%:*}" "${spec#*:}" >/dev/null || bad "pane ${spec%%:*} never showed «${spec#*:}»"
 done
-for p in "$P_CX" "$P_CXB" "$P_P1" "$P_P1B" "$P_SW1" "$P_SW1F" "$P_STUCK" "$P_FOREIGN" "$P_TTL" "$P_FILE" "$P_SLOW" "$P_MARGIN" "$P_MARGINB"; do
-  wait_screen "$p" "›" >/dev/null || bad "pane $p never showed a › prompt"
+for p in "$P_CL" "$P_CLB" "$P_LAB" "$P_DUP1" "$P_DUP2" "$P_LONG" "$P_AWAIT" "$P_MODE" "$P_RACE" \
+  "$P_USERLINE" "$P_USERSLASH" "$P_USERBUSY" "$P_TIGHT" "$P_TIGHTUSER" "$P_GT" "$P_GTUSER" \
+  "$P_VIEWT" "$P_VIEWS" "$P_CX" "$P_CXB" "$P_STUCK" "$P_FOREIGN" "$P_TTL" "$P_STUCK2"; do
+  wait_screen "$p" "? for shortcuts" >/dev/null || bad "pane $p never showed a Claude/Codex footer"
 done
-wait_screen "$P_AWAIT" "draft in progress"
-for p in "$P_USERLINE" "$P_USERSLASH" "$P_USERBUSY" "$P_TIGHT" "$P_TIGHTUSER" "$P_GT" "$P_GTUSER" "$P_VIEWT" "$P_VIEWS"; do
-  wait_screen "$p" "? for shortcuts" >/dev/null || bad "pane $p never showed a Claude footer"
-done
-for p in "$P_P1GT" "$P_P1VIEW" "$P_GTP1IDLE"; do
+for p in "$P_P1" "$P_P1B" "$P_SW1" "$P_SW1F" "$P_FILE" "$P_SLOW" "$P_MARGIN" "$P_MARGINB" \
+  "$P_P1GT" "$P_P1VIEW" "$P_GTP1IDLE"; do
   wait_screen "$p" "⏎" >/dev/null || bad "pane $p never showed a p1 footer"
 done
-wait_screen "$P_STUCK2" "›" >/dev/null || bad "pane $P_STUCK2 never showed a › prompt"
-sleep 0.5
+wait_for "pane $P_DEAD is dead" is_dead "$P_DEAD" || bad "pane $P_DEAD never exited"
 
 section "tmux-panes: live classification (PS1 bash panes + fake TUIs), dead flag"
 "$BIN/tmux-panes" --json >"$WORK/panes.json"; RC=$?
@@ -248,8 +262,17 @@ check "p1 busy: reported as queued steering" out_has "queued as steering"
 check "p1 busy: harness received steering" log_has p1busy "STEER	steer: also run the linter"
 send "$P_P1" "plain p1 message"
 check "p1 idle: delivered" log_has p1a "SUBMIT	plain p1 message"
-send "$P_SLOW" "slow submit please"
-check "p1 slow redraw (text lingers 5 s after submit): exit 0, not UNSENT" rc_is 0
+# The submitted text lingers until p1slow.release exists. Release it only once tmux-send has
+# pressed Enter twice (LATE-ENTER) and looked at the pane after that, so it is in its grace loop.
+"$BIN/tmux-send" "$P_SLOW" "slow submit please" >"$WORK/p1slow.out" 2>&1 & bg=$!
+wait_for "p1slow got a second Enter" grep -qs '^LATE-ENTER' "$WORK/p1slow.log" ||
+  bad "p1 slow redraw: tmux-send never pressed Enter a second time"
+n=$(calls)
+wait_for "tmux-send looked at p1slow after its second Enter" captured_since "$n" "$P_SLOW" ||
+  bad "p1 slow redraw: tmux-send never looked at the pane after its second Enter"
+touch "$WORK/p1slow.release"
+wait "$bg"; RC=$?; OUT="$(cat "$WORK/p1slow.out")"
+check "p1 slow redraw (text lingers after submit): exit 0, not UNSENT" rc_is 0
 check "p1 slow redraw: last line says DELIVERED" bash -c "[[ \"$(word)\" == DELIVERED ]]"
 check "p1 slow redraw: reports the slow submit" out_has "slow submit"
 check "p1 slow redraw: exactly one submit, no duplicate" bash -c "[[ \$(grep -c '^SUBMIT' '$WORK/p1slow.log') == 1 ]]"
@@ -326,7 +349,7 @@ check "--file F without text: pointer to existing file delivered" \
 
 section "default inbox path (TMUX_COMMS_INBOX unset)"
 P_DEFINBOX=$(fake definbox claude)
-wait_screen "$P_DEFINBOX" "❯" >/dev/null || bad "pane $P_DEFINBOX never showed a ❯ prompt"
+wait_screen "$P_DEFINBOX" "? for shortcuts" >/dev/null || bad "pane $P_DEFINBOX never showed a Claude footer"
 DEFLONG="$(printf 'default-inbox-%04d ' $(seq 1 60))END"
 OUT="$(env -u TMUX_COMMS_INBOX "$BIN/tmux-send" "$P_DEFINBOX" "$DEFLONG" --from tester 2>&1)"; RC=$?
 check "default inbox: exit 0" rc_is 0
@@ -338,8 +361,15 @@ check "default inbox: pointer names that file" \
 section "tmux-await"
 OUT="$("$BIN/tmux-await" "$P_FOREIGN" --empty --timeout 1 2>&1)"; RC=$?
 check "await --empty on an occupied composer times out (exit 1)" rc_is 1
-OUT="$("$BIN/tmux-await" awaiter --empty --timeout 15 2>&1)"; RC=$?
-check "await --empty returns 0 once the prefill was submitted elsewhere" rc_is 0
+# awaiter holds a draft until awaiter.release exists: release it once tmux-await has looked.
+n=$(calls)
+"$BIN/tmux-await" awaiter --empty --timeout 30 >"$WORK/awaiter.out" 2>&1 & bg=$!
+wait_for "tmux-await looked at awaiter" captured_since "$n" "$P_AWAIT" ||
+  bad "await --empty: tmux-await never looked at the pane while it held the draft"
+touch "$WORK/awaiter.release"
+wait "$bg"; RC=$?; OUT="$(cat "$WORK/awaiter.out")"
+check "await --empty waits on a draft, returns 0 once it was submitted elsewhere" rc_is 0
+check "await --empty: the draft was submitted while it waited" log_has awaiter "TYPED	draft in progress"
 OUT="$("$BIN/tmux-await" claudebusy --idle --timeout 1 2>&1)"; RC=$?
 check "await --idle on a busy pane times out (exit 1)" rc_is 1
 OUT="$("$BIN/tmux-await" claude1 --idle --timeout 5 2>&1)"; RC=$?
