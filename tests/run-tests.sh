@@ -4,7 +4,7 @@
 # a guard shim makes any tmux call from the tools that targets another server fail loudly.
 # Everything the tools write (HOME, XDG_STATE_HOME, inbox, logs) stays in one temp work dir,
 # so the suite does not touch the machine it runs on.
-# usage: tests/run-tests.sh    (≈3 min; needs tmux >= 3.0 and python3 >= 3.8; shellcheck is
+# usage: tests/run-tests.sh    (≈3 min; needs tmux >= 3.0 and python3 >= 3.11; shellcheck is
 #                              used when installed, skipped with a note otherwise)
 set -uo pipefail
 

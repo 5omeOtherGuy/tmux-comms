@@ -35,7 +35,8 @@ up as a failing test rather than as a silent mis-send.
 ## Requirements
 
 * `tmux` 3.0 or newer on the machine that runs the panes.
-* `python3` 3.7 or newer (standard library only; nothing to `pip install`).
+* `python3` 3.11 or newer (standard library only; nothing to `pip install`). CI runs the gate on
+  3.11 and on the newest Python release.
 * `bash` 4 or newer for the three commands.
 * Optional: `shellcheck`, used by the test suite when present (skipped otherwise).
 
