@@ -1,9 +1,10 @@
+Archived 2026-11-20: this repository is retired. Source, branches, tags and existing releases are retained for reference.
+
 # tmux-comms
 
 Verified message delivery into agent CLIs running in tmux panes (Claude Code, Codex, others).
 
-Status: prototype. It works and is tested, but commands, output and exit codes may still change
-without notice.
+Status: archived. Retained for reference; no further development is planned.
 
 [![gate](https://github.com/5omeOtherGuy/tmux-comms/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/5omeOtherGuy/tmux-comms/actions/workflows/ci.yml)
 
