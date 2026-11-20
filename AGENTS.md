@@ -2,7 +2,7 @@
 
 ## Profile
 - Purpose: type messages into tmux panes running agent CLIs and verify they were submitted
-- Stage: prototype (repository standard 2026-10-18)
+- Stage: archived (repository standard)
 - Gate: `scripts/gate` (CI job `gate`)
 - Landing: direct to main after a green gate; agents land: yes
 - Release: none; agents release: no
